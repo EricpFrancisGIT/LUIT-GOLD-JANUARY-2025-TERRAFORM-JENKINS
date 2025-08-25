@@ -1,102 +1,128 @@
-# 🚀 Jenkins CI/CD Server on AWS using Terraform
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.0"
+    }
+  }
+}
 
-This project provisions a **Jenkins CI/CD server** on an EC2 instance using **Terraform** in your AWS account. The Jenkins server is bootstrapped via user data on launch and is accessible via port `8080`. The setup includes security best practices such as IP-restricted SSH access and private S3 artifact storage.
+#Configuring the provider
+provider "aws" {
+  region = "us-east-1"
+}
 
-> **Project Tiers:**
-> - ✅ **Foundational**: Monolithic `main.tf` with hardcoded values
-> - ✅ **Advanced**: Modular codebase with `variables.tf`, `providers.tf`, and reusable components
-> - ✅ **Complex**: IAM Role with S3 read/write access for Jenkins, verified via AWS CLI
+#Configuriung Jenkins instance
+resource "aws_instance" "lup-jenkins" {
+  ami                         = "ami-00ca32bbc84273381"
+  instance_type               = "t2.micro"
+  associate_public_ip_address = true
+  vpc_security_group_ids      = [aws_security_group.lup-jenkins-sg.id]
+  user_data                   = file("jenkins_installation.sh")
 
----
+  #iam_instance_profile
+  tags = {
+    Name = "LUP-JENKINS"
+  }
+}
 
-## 📁 Project Structure
-
-```bash
-jenkins-terraform-ec2/
-├── main.tf              # Core Terraform configuration (EC2, S3, SG, IAM)
-├── variables.tf         # Variables for environment customization
-├── providers.tf         # AWS provider definition
-├── outputs.tf           # Useful output values like EC2 public IP
-├── user-data.sh         # Script to install and start Jenkins
-├── README.md            # Project documentation
-└── screenshots/
-    └── jenkins-login.png
-
-🛠️ Features
-
-    🖥️ Provisions a Jenkins EC2 instance in the default VPC
-
-    🔐 Configures security groups for ports 22 and 8080
-
-    🪣 Creates a private S3 bucket for Jenkins artifacts
-
-    🔁 Bootstraps EC2 instance with Jenkins installation script
-
-    🔑 IAM Role grants Jenkins EC2 instance access to S3
-
-    ✅ Verified Jenkins UI access and S3 CLI interaction
-
-📸 Jenkins Screenshot
-
-🧪 How to Use
-1. Clone the Repo
-git clone https://github.com/YOUR-USERNAME/jenkins-terraform-ec2.git
-cd jenkins-terraform-ec2
-
-2. Initialize Terraform
-
-terraform init
-
-3. Review and Apply the Plan
-
-terraform plan
-terraform apply
-
-4. Access Jenkins
-
-    Open your browser
-
-    Navigate to: http://<EC2-PUBLIC-IP>:8080
-
-    Unlock Jenkins using the admin password from /var/lib/jenkins/secrets/initialAdminPassword
-
-5. Validate S3 Access (Complex Tier)
-
-aws s3 ls s3://<your-bucket-name> --region <your-region>
-
-🔧 Sample Pipeline (Optional)
-
-You can optionally add a sample Jenkins pipeline using a basic Jenkinsfile. Refer to Jenkins documentation:
-
-    https://www.jenkins.io/doc/book/pipeline/getting-started/
-
-✅ Prerequisites
-
-    AWS CLI configured with appropriate credentials
-
-    Terraform installed
-
-    SSH key pair (for connecting to EC2, if needed)
-
-🔐 Security Considerations
-
-    SSH restricted to your IP only
-
-    S3 bucket is private
-
-    IAM role with scoped permissions (S3 only)
-
-🌐 GitHub Repository
-
-🔗 GitHub Repository Link
-📜 License
-
-This project is licensed under the MIT License.
-🙌 Acknowledgments
-
-    Jenkins Installation Docs
-
-    Terraform AWS Provider
+#Jenkins Security Groups
+resource "aws_security_group" "lup-jenkins-sg" {
+  name        = "lup-jenkins-sg"
+  description = "Configured to Allow Traffic on Port 22,8080, 443 and 80"
 
 
----
+  ingress {
+    description = "Allow SSH Traffic"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "Allow Jenkins Traffic"
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "Allow HTTPS Traffic"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "Allow HTTP traffic"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_s3_bucket" "project1-jenkins-bucket" {
+  bucket = "jenkins-s3-bucket-eric-gold2025"
+
+  tags = {
+    Name = "LUP-JENKINS-BUCKET"
+  }
+}
+
+resource "aws_s3_bucket_acl" "project1-jenkins-bucket-acl" {
+  bucket     = aws_s3_bucket.project1-jenkins-bucket.id
+  acl        = "private"
+  depends_on = [aws_s3_bucket_ownership_controls.project1-jenkins-bucket-ownership]
+}
+
+
+resource "aws_s3_bucket_ownership_controls" "project1-jenkins-bucket-ownership" {
+  bucket = aws_s3_bucket.project1-jenkins-bucket.id
+
+  rule {
+    object_ownership = "ObjectWriter"
+  }
+}
+
+#backend for logs/terraform statefile
+
+terraform {
+  backend "s3" {
+    bucket = "luit-terraform-project1-08242025"
+    key    = "luit-terraform-project1-08242025/terraform/state.tf"
+    region = "us-east-1"
+  }
+}
+
+#outputs
+
+output "bucket_name" {
+  value = aws_s3_bucket.project1-jenkins-bucket.id
+}
+
+output "instance_id" {
+  value = aws_instance.lup-jenkins.id
+}
+
+output "jenkins_url" {
+  value = "http://${aws_instance.lup-jenkins.public_ip}:8080"
+}
+
+output "jenkins_ip" {
+  value = aws_instance.lup-jenkins.public_ip
+}
+
+output "jenkins_security_group_id" {
+  value = aws_security_group.lup-jenkins-sg.id
+}
